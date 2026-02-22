@@ -1074,9 +1074,11 @@ const _cp = require('child_process');
 const _EventEmitter = require('events');
 
 // Commands that produce side effects (files). Must return failure.
+// Note: node-gyp, make, cmake are NOT mocked — python3/make/g++ are
+// installed in the rootfs so native addon compilation works properly.
 function _isSideEffectCmd(cmd) {
   const base = String(cmd).split('/').pop();
-  return base === 'git' || base === 'node-gyp' || base === 'cmake' || base === 'make';
+  return base === 'git' || base === 'cmake';
 }
 
 // Should this error be mocked? ENOSYS always, ENOENT for side-effect cmds.
