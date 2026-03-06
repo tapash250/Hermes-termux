@@ -790,6 +790,16 @@ class BootstrapManager(
     }
 
     private fun deleteRecursively(file: File) {
+        // CRITICAL: Do NOT follow symlinks — the rootfs contains symlinks
+        // to /storage/emulated/0 (sdcard). Following them would delete the
+        // user's photos, downloads, and other real files.
+        try {
+            val path = file.toPath()
+            if (java.nio.file.Files.isSymbolicLink(path)) {
+                file.delete()
+                return
+            }
+        } catch (_: Exception) {}
         if (file.isDirectory) {
             file.listFiles()?.forEach { deleteRecursively(it) }
         }
