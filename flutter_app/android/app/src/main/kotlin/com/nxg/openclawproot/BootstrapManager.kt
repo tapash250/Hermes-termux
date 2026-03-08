@@ -793,6 +793,17 @@ class BootstrapManager(
         // CRITICAL: Do NOT follow symlinks — the rootfs contains symlinks
         // to /storage/emulated/0 (sdcard). Following them would delete the
         // user's photos, downloads, and other real files.
+
+        // Path boundary check: refuse to delete anything outside filesDir.
+        // This is a secondary safeguard against accidental data loss (#67, #63).
+        try {
+            if (!file.canonicalPath.startsWith(filesDir)) {
+                return
+            }
+        } catch (_: Exception) {
+            return // If we can't resolve the path, don't risk deleting
+        }
+
         try {
             val path = file.toPath()
             if (java.nio.file.Files.isSymbolicLink(path)) {

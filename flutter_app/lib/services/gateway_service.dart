@@ -12,6 +12,7 @@ class GatewayService {
   StreamSubscription? _logSubscription;
   final _stateController = StreamController<GatewayState>.broadcast();
   GatewayState _state = const GatewayState();
+  DateTime? _startingAt;
   static final _tokenUrlRegex = RegExp(r'https?://(?:localhost|127\.0\.0\.1):18789/#token=[0-9a-f]+');
   static final _boxDrawing = RegExp(r'[│┤├┬┴┼╮╯╰╭─╌╴╶┌┐└┘◇◆]+');
 
@@ -98,6 +99,7 @@ class GatewayService {
         dashboardUrl = urlMatch.group(0);
         final prefs = PreferencesService();
         prefs.init().then((_) => prefs.dashboardUrl = dashboardUrl);
+        NativeBridge.showUrlNotification(dashboardUrl!, title: 'Dashboard Ready');
       }
       _updateState(_state.copyWith(logs: logs, dashboardUrl: dashboardUrl));
     });
@@ -207,6 +209,7 @@ fs.writeFileSync(p, JSON.stringify(c, null, 2));
         }
       } catch (_) {}
       await _writeNodeAllowConfig();
+      _startingAt = DateTime.now();
       await NativeBridge.startGateway();
       _subscribeLogs();
       _startHealthCheck();
@@ -239,10 +242,15 @@ fs.writeFileSync(p, JSON.stringify(c, null, 2));
 
   void _startHealthCheck() {
     _healthTimer?.cancel();
-    _healthTimer = Timer.periodic(
-      const Duration(milliseconds: AppConstants.healthCheckIntervalMs),
-      (_) => _checkHealth(),
-    );
+    // Delay the first health check by 15s — Node.js inside proot needs time to start
+    Future.delayed(const Duration(seconds: 15), () {
+      if (_state.status == GatewayStatus.stopped) return;
+      _checkHealth();
+      _healthTimer = Timer.periodic(
+        const Duration(milliseconds: AppConstants.healthCheckIntervalMs),
+        (_) => _checkHealth(),
+      );
+    });
   }
 
   Future<void> _checkHealth() async {
@@ -262,6 +270,15 @@ fs.writeFileSync(p, JSON.stringify(c, null, 2));
       // Still starting or temporarily unreachable
       final isRunning = await NativeBridge.isGatewayRunning();
       if (!isRunning && _state.status != GatewayStatus.stopped) {
+        // Grace period: if we're still within 60s of startup, don't declare dead
+        if (_startingAt != null &&
+            _state.status == GatewayStatus.starting &&
+            DateTime.now().difference(_startingAt!).inSeconds < 60) {
+          _updateState(_state.copyWith(
+            logs: [..._state.logs, _ts('[INFO] Starting, waiting for gateway...')],
+          ));
+          return;
+        }
         _updateState(_state.copyWith(
           status: GatewayStatus.stopped,
           logs: [..._state.logs, _ts('[WARN] Gateway process not running')],

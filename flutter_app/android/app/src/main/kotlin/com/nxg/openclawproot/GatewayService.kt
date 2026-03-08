@@ -44,7 +44,7 @@ class GatewayService : Service() {
     private var gatewayProcess: Process? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var restartCount = 0
-    private val maxRestarts = 3
+    private val maxRestarts = 5
     private var startTime: Long = 0
     private var uptimeThread: Thread? = null
 
@@ -176,14 +176,16 @@ class GatewayService : Service() {
                     } catch (_: Exception) {}
                 }.start()
 
-                // Read stderr
+                // Read stderr — log all lines on first attempt for debugging visibility
                 val stderrReader = BufferedReader(InputStreamReader(gatewayProcess!!.errorStream))
+                val currentRestartCount = restartCount
                 Thread {
                     try {
                         var line: String?
                         while (stderrReader.readLine().also { line = it } != null) {
                             val l = line ?: continue
-                            if (!l.contains("proot warning") && !l.contains("can't sanitize")) {
+                            if (currentRestartCount == 0 ||
+                                (!l.contains("proot warning") && !l.contains("can't sanitize"))) {
                                 emitLog("[ERR] $l")
                             }
                         }
@@ -191,7 +193,14 @@ class GatewayService : Service() {
                 }.start()
 
                 val exitCode = gatewayProcess!!.waitFor()
-                emitLog("Gateway exited with code $exitCode")
+                val uptimeMs = System.currentTimeMillis() - startTime
+                val uptimeSec = uptimeMs / 1000
+                emitLog("Gateway exited with code $exitCode (uptime: ${uptimeSec}s)")
+
+                // If the gateway ran for >60s, it was a transient crash — reset counter
+                if (uptimeMs > 60_000) {
+                    restartCount = 0
+                }
 
                 if (isRunning && restartCount < maxRestarts) {
                     restartCount++
